@@ -168,34 +168,35 @@ class TestCostCalculations:
         expected = capacity * cost_per_kwh
         assert expected == 10125
 
-    def test_federal_credit_30_percent(self):
-        """Test federal ITC is 30%."""
+    def test_federal_credit_expired(self):
+        """Test federal ITC expired Dec 31, 2025 - no longer applied."""
         total_cost = 38125  # Solar + battery
-        federal_credit = total_cost * 0.30
-        assert federal_credit == 11437.50
+        # Federal credit is 0 after expiration
+        federal_credit = 0
+        net_cost = total_cost - federal_credit
+        assert net_cost == total_cost
 
-    def test_net_cost_with_federal_credit(self):
-        """Test net cost after federal credit."""
+    def test_net_cost_no_federal_credit(self):
+        """Test net cost equals gross cost (no federal credit after Dec 31, 2025)."""
         solar_cost = 28000
         battery_cost = 10125
         total = solar_cost + battery_cost
-        federal_credit = total * 0.30
-        net = total - federal_credit
 
+        # Net cost = total (no federal credit)
+        net = total
         assert total == 38125
-        assert federal_credit == 11437.50
-        assert net == 26687.50
+        assert net == 38125
 
-    def test_net_cost_with_ca_incentive(self):
-        """Test net cost with CA incentive (when enabled)."""
+    def test_net_cost_with_ca_incentive_only(self):
+        """Test net cost with CA incentive only (no federal credit)."""
         solar_cost = 28000
         battery_cost = 10125
         total = solar_cost + battery_cost
-        federal_credit = total * 0.30
         ca_incentive = 13.5 * 50  # $50/kWh incentive
 
-        net = total - federal_credit - ca_incentive
-        assert net == pytest.approx(26012.50, rel=0.01)
+        # No federal credit after Dec 31, 2025
+        net = total - ca_incentive
+        assert net == pytest.approx(37450, rel=0.01)
 
 
 class TestPaybackCalculation:
@@ -203,17 +204,17 @@ class TestPaybackCalculation:
 
     def test_payback_years(self):
         """Test payback = net cost / yearly savings."""
-        net_cost = 19600
+        net_cost = 28000  # No federal credit
         yearly_savings = 2450
         payback = net_cost / yearly_savings
-        assert payback == 8.0
+        assert payback == pytest.approx(11.43, rel=0.01)
 
     def test_payback_with_battery(self):
         """Test payback with battery (higher cost, higher savings)."""
-        net_cost = 26687.50
+        net_cost = 38125  # Solar + battery, no federal credit
         yearly_savings = 2400  # Higher savings with battery
         payback = net_cost / yearly_savings
-        assert payback == pytest.approx(11.12, rel=0.01)
+        assert payback == pytest.approx(15.89, rel=0.01)
 
     def test_payback_capped_at_25_years(self):
         """Test payback display is capped at 25 years."""

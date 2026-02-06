@@ -72,7 +72,7 @@ Savera/
 - `/api/utility-by-zip` - Utility detection
 - `/api/pricing` - Cost calculations with/without battery
 - `/api/installers` - Installer lookup
-- Federal credit (30%)
+- Federal credit expired Dec 31, 2025 (no longer applied)
 - Battery cost calculations
 
 ### Frontend Tests

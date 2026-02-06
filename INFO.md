@@ -51,15 +51,16 @@ Savings = (Self-consumed kWh × Retail Rate) + (Exported kWh × $0.08)
 |-----------|--------------|-------|
 | Solar panels + install | $3.00-4.00/watt | From CA installer data |
 | Battery (optional) | ~$750/kWh | 13.5 kWh = ~$10,000 |
-| **Federal Tax Credit** | -30% | Through 2032 |
+| ~~Federal Tax Credit~~ | ~~-30%~~ | **⚠️ EXPIRED Dec 31, 2025** |
 | CA Incentives (SGIP) | Varies | ⚠️ Mostly ended - toggle OFF by default |
 
 **Example 8kW system:**
 ```
 Gross cost:     $28,000
-Federal credit: -$8,400 (30%)
-Net cost:       $19,600
+Net cost:       $28,000 (no federal credit)
 ```
+
+> **Note**: The 30% Federal Investment Tax Credit (ITC) expired on December 31, 2025. This significantly impacts payback periods for new installations in 2026+.
 
 ### California Incentives (SGIP)
 
@@ -105,7 +106,7 @@ SDG&E has highest rates = best solar savings.
 | DC-to-AC derate | 85% | Google Solar API |
 | Panel degradation | 0.5%/year | Manufacturer specs |
 | System lifetime | 20-25 years | Industry standard |
-| Federal ITC | 30% | IRS, valid 2022-2032 |
+| ~~Federal ITC~~ | ~~30%~~ | **Expired Dec 31, 2025** |
 | NEM 3.0 export rate | ~$0.08/kWh | CPUC average |
 
 ---
@@ -180,7 +181,7 @@ Without this data, we'd have to guess your self-consumption.
 | **kW** | Kilowatt, unit of power (system size) |
 | **NEM 3.0** | Net Energy Metering 3.0, California's current solar billing rules |
 | **TOU** | Time-of-Use rates (electricity costs more 4-9pm) |
-| **ITC** | Investment Tax Credit (federal 30% tax credit) |
+| **ITC** | Investment Tax Credit (federal 30% - **expired Dec 31, 2025**) |
 | **SGIP** | Self-Generation Incentive Program (CA battery rebate - mostly ended) |
 | **DC/AC** | Direct/Alternating Current (panels make DC, home uses AC) |
 

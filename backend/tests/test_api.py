@@ -149,9 +149,10 @@ class TestPricingEndpoint:
 
         assert 'avg_cost_per_watt' in data
         assert 'estimated_total_cost' in data
-        assert 'federal_tax_credit_30' in data
-        assert 'net_cost_after_federal' in data
+        assert 'net_cost' in data
         assert data['battery'] is None
+        # Federal ITC expired Dec 31, 2025
+        assert 'federal_tax_credit_30' not in data
 
     @patch('app.load_installer_data')
     @patch('app.load_battery_pricing_data')
@@ -188,8 +189,8 @@ class TestPricingEndpoint:
 
     @patch('app.load_installer_data')
     @patch('app.load_battery_pricing_data')
-    def test_federal_credit_30_percent(self, mock_battery, mock_installer, client, mock_installer_data):
-        """Test that federal credit is exactly 30%."""
+    def test_federal_credit_expired(self, mock_battery, mock_installer, client, mock_installer_data):
+        """Test that federal credit is NOT included (expired Dec 31, 2025)."""
         mock_installer.return_value = mock_installer_data
         mock_battery.return_value = {
             'avg_cost_per_kwh': 750,
@@ -209,11 +210,12 @@ class TestPricingEndpoint:
                               content_type='application/json')
 
         data = json.loads(response.data)
-        total_cost = data['estimated_total_cost']
-        federal_credit = data['federal_tax_credit_30']
 
-        # Federal credit should be 30% of total
-        assert abs(federal_credit - (total_cost * 0.30)) < 1  # Allow $1 rounding
+        # Federal ITC expired Dec 31, 2025 - should not be in response
+        assert 'federal_tax_credit_30' not in data
+        assert 'net_cost_after_federal' not in data
+        # Net cost should equal total cost (no credits)
+        assert data['net_cost'] == data['total_system_cost']
 
 
 class TestInstallersEndpoint:
@@ -292,18 +294,12 @@ class TestCalculations:
         # Should be (3.50 + 3.25 + 3.60) / 3 = 3.45
         assert abs(expected_avg - 3.45) < 0.01
 
-    def test_federal_credit_calculation(self):
-        """Test 30% federal credit calculation."""
+    def test_net_cost_equals_gross_no_federal_credit(self):
+        """Test net cost = gross (no federal credit after Dec 31, 2025)."""
         gross_cost = 28000
-        expected_credit = gross_cost * 0.30
-        assert expected_credit == 8400
-
-    def test_net_cost_calculation(self):
-        """Test net cost = gross - federal credit."""
-        gross_cost = 28000
-        federal_credit = 8400
-        net_cost = gross_cost - federal_credit
-        assert net_cost == 19600
+        # Federal ITC expired - net cost equals gross cost
+        net_cost = gross_cost
+        assert net_cost == 28000
 
     def test_battery_cost_calculation(self):
         """Test battery cost = capacity * $/kWh."""

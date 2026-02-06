@@ -392,8 +392,8 @@ export default function Home() {
               // California incentives (SGIP) - only apply if toggle is on
               const batteryIncentive = (includeBattery && includeCAIncentives) ? (pricingData?.battery?.incentive || 0) : 0;
               const totalGrossCost = solarGrossCost + batteryCost;
-              const federalCredit = totalGrossCost * 0.30;
-              const netCost = totalGrossCost - federalCredit - batteryIncentive;
+              // Note: Federal ITC (30%) expired Dec 31, 2025
+              const netCost = totalGrossCost - batteryIncentive;
 
               const paybackYears = yearlySavings > 0 ? netCost / yearlySavings : 99;
               const totalBillWithoutSolar = yearlyBillWithoutSolar * 25;
@@ -496,7 +496,7 @@ export default function Home() {
                           </div>
                           {includeBattery && (
                             <p className="battery-cost-impact">
-                              +<strong>${Math.round(batteryCost * 0.7).toLocaleString()}</strong> net cost (after 30% tax credit)
+                              +<strong>${Math.round(batteryCost).toLocaleString()}</strong> added to system cost
                             </p>
                           )}
                         </div>
@@ -597,10 +597,6 @@ export default function Home() {
                           <span>${Math.round(batteryCost).toLocaleString()}</span>
                         </div>
                       )}
-                      <div className="cost-summary-row">
-                        <span>Federal tax credit (30%)</span>
-                        <span className="credit">-${Math.round(federalCredit).toLocaleString()}</span>
-                      </div>
                       {batteryIncentive > 0 && (
                         <div className="cost-summary-row">
                           <span>CA storage incentive</span>
@@ -657,8 +653,8 @@ export default function Home() {
                           <div className="cost-category">
                             <div className="cost-category-title">💡 How It Works</div>
                             <div className="cost-row small" style={{flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem'}}>
-                              <span>• Federal ITC gives 30% back on your taxes</span>
-                              <span>• Applies to both solar panels AND battery</span>
+                              <span>• Federal ITC (30%) expired Dec 31, 2025</span>
+                              <span>• CA incentives (SGIP) mostly ended — toggle above if eligible</span>
                               <span>• Costs vary by installer and roof complexity</span>
                             </div>
                           </div>

@@ -460,17 +460,17 @@ def get_pricing():
                 'net_battery_cost': round(battery_cost - battery_incentive, 2)
             }
         
-        federal_credit = total_cost * 0.30
-        
+        # Note: Federal ITC (30%) expired Dec 31, 2025
+
         return jsonify({
             'source': 'default',
             'avg_cost_per_watt': avg_cost_per_watt,
             'estimated_total_cost': round(solar_cost, 2),
-            'federal_tax_credit_30': round(federal_credit, 2),
-            'net_cost_after_federal': round(total_cost - federal_credit, 2),
+            'net_cost': round(total_cost, 2),
             'sample_size': 0,
             'battery': battery_data,
-            'total_system_cost': round(total_cost, 2)
+            'total_system_cost': round(total_cost, 2),
+            'note': 'Federal ITC (30%) expired Dec 31, 2025'
         })
     
     # Filter by zip code or county
@@ -533,8 +533,8 @@ def get_pricing():
             'sample_size': battery_pricing['sample_size']
         }
     
-    federal_itc = total_cost * 0.30  # 30% federal tax credit applies to solar + battery
-    
+    # Note: Federal ITC (30%) expired Dec 31, 2025
+
     return jsonify({
         'source': 'california_dg_stats',
         'zip_code': zip_str,
@@ -549,10 +549,9 @@ def get_pricing():
         'estimated_total_cost': round(solar_cost, 2),
         'battery': battery_data,
         'total_system_cost': round(total_cost, 2),
-        'federal_tax_credit_30': round(federal_itc, 2),
-        'net_cost_after_federal': round(total_cost - federal_itc, 2),
+        'net_cost': round(total_cost, 2),
         'sample_size': len(local_data),
-        'note': 'Prices based on California DG Stats interconnection data (2020-2025)' + (' and SOMAH battery data' if include_battery else '')
+        'note': 'Prices based on California DG Stats interconnection data (2020-2025). Federal ITC (30%) expired Dec 31, 2025.' + (' Includes SOMAH battery data.' if include_battery else '')
     })
 
 

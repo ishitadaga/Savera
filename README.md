@@ -98,7 +98,7 @@ Savera/
 - **Self-consumption**: 48% without battery, 75% with battery
 - **NEM 3.0 export rate**: $0.08/kWh
 - **DC-to-AC derate**: 85%
-- **Federal tax credit**: 30% ITC
+- **Federal tax credit**: ~~30% ITC~~ (expired Dec 31, 2025)
 
 See [INFO.md](INFO.md) for detailed calculation explanations.
 

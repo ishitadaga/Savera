@@ -129,42 +129,44 @@ describe('Cost Calculations', () => {
     });
   });
 
-  describe('Federal Tax Credit', () => {
-    it('should be 30% of total cost', () => {
+  describe('Federal Tax Credit (Expired Dec 31, 2025)', () => {
+    it('should no longer apply federal credit', () => {
       const totalCost = 38125;
-      const federalCredit = totalCost * 0.30;
-      expect(federalCredit).toBe(11437.5);
+      // Federal ITC expired - no credit applied
+      const federalCredit = 0;
+      const netCost = totalCost - federalCredit;
+      expect(netCost).toBe(38125);
     });
   });
 
   describe('Net Cost', () => {
-    it('should subtract federal credit', () => {
+    it('should equal gross cost (no federal credit)', () => {
       const solarCost = 28000;
       const batteryCost = 10125;
       const totalCost = solarCost + batteryCost;
-      const federalCredit = totalCost * 0.30;
-      const netCost = totalCost - federalCredit;
+      // No federal credit after Dec 31, 2025
+      const netCost = totalCost;
 
-      expect(netCost).toBe(26687.5);
+      expect(netCost).toBe(38125);
     });
 
-    it('should subtract CA incentive when enabled', () => {
+    it('should only subtract CA incentive when enabled', () => {
       const totalCost = 38125;
-      const federalCredit = totalCost * 0.30;
+      // No federal credit
       const caIncentive = 13.5 * 50; // $50/kWh
-      const netCost = totalCost - federalCredit - caIncentive;
+      const netCost = totalCost - caIncentive;
 
-      expect(netCost).toBeCloseTo(26012.5, 1);
+      expect(netCost).toBeCloseTo(37450, 1);
     });
   });
 });
 
 describe('Payback Calculation', () => {
   it('should calculate payback years', () => {
-    const netCost = 19600;
+    const netCost = 28000;  // No federal credit
     const yearlySavings = 2450;
     const payback = netCost / yearlySavings;
-    expect(payback).toBe(8);
+    expect(payback).toBeCloseTo(11.43, 1);
   });
 
   it('should handle zero savings', () => {
