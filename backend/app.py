@@ -40,6 +40,7 @@ DATA_DIR = Path(__file__).parent.parent
 # Cache for loaded data
 _installer_data = None
 _pricing_data = None
+_battery_pricing_data = None
 _places_rating_cache = {}  # Cache for Places API ratings
 
 
@@ -159,6 +160,108 @@ def get_utility_from_zip(zip_code):
     if not matches.empty:
         return matches['Utility'].mode().iloc[0] if len(matches['Utility'].mode()) > 0 else "Unknown"
     return "Unknown"
+
+
+def load_battery_pricing_data():
+    """Load and calculate average battery pricing from SOMAH dataset."""
+    global _battery_pricing_data
+    if _battery_pricing_data is not None:
+        return _battery_pricing_data
+    
+    somah_file = DATA_DIR / 'SOMAH_working_data_set_2026-01-19.csv'
+    
+    if not somah_file.exists():
+        logger.warning(f"SOMAH dataset not found at {somah_file}")
+        # Return default battery pricing if no data
+        _battery_pricing_data = {
+            'avg_cost_per_kwh': 750,  # Default $750/kWh
+            'min_cost_per_kwh': 600,
+            'max_cost_per_kwh': 900,
+            'sample_size': 0,
+            'common_capacities': [10, 13.5, 20, 27],  # Common residential battery sizes
+            'source': 'default'
+        }
+        return _battery_pricing_data
+    
+    try:
+        # Load only battery-relevant columns
+        columns = [
+            'Storage Cost',
+            'Total Energy Storage Capacity (kWh)',
+            'Battery Energy Storage Capacity (kWh)',
+            'Storage Incentive Amount',
+            'Battery Manufacturer',
+            'Battery Model',
+            'Battery Quantity',
+            'Battery Technology'
+        ]
+        
+        df = pd.read_csv(somah_file, usecols=lambda x: x in columns, low_memory=False)
+        
+        # Filter to records with valid battery data
+        df['Storage Cost'] = pd.to_numeric(df['Storage Cost'], errors='coerce')
+        df['Total Energy Storage Capacity (kWh)'] = pd.to_numeric(df['Total Energy Storage Capacity (kWh)'], errors='coerce')
+        df['Storage Incentive Amount'] = pd.to_numeric(df['Storage Incentive Amount'], errors='coerce')
+        
+        battery_df = df[
+            (df['Storage Cost'] > 0) & 
+            (df['Total Energy Storage Capacity (kWh)'] > 0)
+        ].copy()
+        
+        if len(battery_df) > 0:
+            # Calculate cost per kWh
+            battery_df['cost_per_kwh'] = battery_df['Storage Cost'] / battery_df['Total Energy Storage Capacity (kWh)']
+            
+            # Remove outliers (below 5th and above 95th percentile)
+            if len(battery_df) > 20:
+                lower = battery_df['cost_per_kwh'].quantile(0.05)
+                upper = battery_df['cost_per_kwh'].quantile(0.95)
+                battery_df = battery_df[(battery_df['cost_per_kwh'] >= lower) & (battery_df['cost_per_kwh'] <= upper)]
+            
+            avg_cost = battery_df['cost_per_kwh'].mean()
+            min_cost = battery_df['cost_per_kwh'].min()
+            max_cost = battery_df['cost_per_kwh'].max()
+            
+            # Calculate average incentive per kWh
+            incentive_df = battery_df[battery_df['Storage Incentive Amount'] > 0]
+            avg_incentive_per_kwh = 0
+            if len(incentive_df) > 0:
+                avg_incentive_per_kwh = (incentive_df['Storage Incentive Amount'] / incentive_df['Total Energy Storage Capacity (kWh)']).mean()
+            
+            _battery_pricing_data = {
+                'avg_cost_per_kwh': round(avg_cost, 2),
+                'min_cost_per_kwh': round(min_cost, 2),
+                'max_cost_per_kwh': round(max_cost, 2),
+                'avg_incentive_per_kwh': round(avg_incentive_per_kwh, 2),
+                'sample_size': len(battery_df),
+                'common_capacities': [10, 13.5, 20, 27],
+                'source': 'somah_dataset'
+            }
+            logger.info(f"Loaded battery pricing from SOMAH: ${avg_cost:.2f}/kWh from {len(battery_df)} records")
+        else:
+            _battery_pricing_data = {
+                'avg_cost_per_kwh': 750,
+                'min_cost_per_kwh': 600,
+                'max_cost_per_kwh': 900,
+                'avg_incentive_per_kwh': 0,
+                'sample_size': 0,
+                'common_capacities': [10, 13.5, 20, 27],
+                'source': 'default'
+            }
+            
+    except Exception as e:
+        logger.error(f"Error loading SOMAH battery data: {e}")
+        _battery_pricing_data = {
+            'avg_cost_per_kwh': 750,
+            'min_cost_per_kwh': 600,
+            'max_cost_per_kwh': 900,
+            'avg_incentive_per_kwh': 0,
+            'sample_size': 0,
+            'common_capacities': [10, 13.5, 20, 27],
+            'source': 'default'
+        }
+    
+    return _battery_pricing_data
 
 
 @app.route('/api/health', methods=['GET'])
@@ -324,24 +427,50 @@ def get_data_layers():
 def get_pricing():
     """
     Calculate pricing based on system size and regional averages from California data.
+    Now includes optional battery storage pricing.
     """
     data = request.json
     zip_code = data.get('zip_code', '')
     system_size_kw = data.get('system_size_kw', 6)  # Default 6kW system
     utility = data.get('utility', '')
+    include_battery = data.get('include_battery', False)
+    battery_capacity_kwh = data.get('battery_capacity_kwh', 13.5)  # Default Tesla Powerwall size
     
     df = load_installer_data()
     
     if df.empty:
         # Return default California averages if no data
         avg_cost_per_watt = 3.50
+        solar_cost = avg_cost_per_watt * system_size_kw * 1000
+        
+        # Battery pricing
+        battery_data = None
+        total_cost = solar_cost
+        if include_battery:
+            battery_pricing = load_battery_pricing_data()
+            battery_cost = battery_pricing['avg_cost_per_kwh'] * battery_capacity_kwh
+            battery_incentive = battery_pricing.get('avg_incentive_per_kwh', 0) * battery_capacity_kwh
+            total_cost = solar_cost + battery_cost
+            battery_data = {
+                'included': True,
+                'capacity_kwh': battery_capacity_kwh,
+                'cost': round(battery_cost, 2),
+                'cost_per_kwh': battery_pricing['avg_cost_per_kwh'],
+                'incentive': round(battery_incentive, 2),
+                'net_battery_cost': round(battery_cost - battery_incentive, 2)
+            }
+        
+        federal_credit = total_cost * 0.30
+        
         return jsonify({
             'source': 'default',
             'avg_cost_per_watt': avg_cost_per_watt,
-            'estimated_total_cost': avg_cost_per_watt * system_size_kw * 1000,
-            'federal_tax_credit': avg_cost_per_watt * system_size_kw * 1000 * 0.30,
-            'net_cost': avg_cost_per_watt * system_size_kw * 1000 * 0.70,
-            'sample_size': 0
+            'estimated_total_cost': round(solar_cost, 2),
+            'federal_tax_credit_30': round(federal_credit, 2),
+            'net_cost_after_federal': round(total_cost - federal_credit, 2),
+            'sample_size': 0,
+            'battery': battery_data,
+            'total_system_cost': round(total_cost, 2)
         })
     
     # Filter by zip code or county
@@ -378,8 +507,33 @@ def get_pricing():
         min_cost = 2.50
         max_cost = 5.00
     
-    estimated_total = avg_cost_per_watt * system_size_kw * 1000
-    federal_itc = estimated_total * 0.30  # 30% federal tax credit
+    solar_cost = avg_cost_per_watt * system_size_kw * 1000
+    
+    # Battery pricing calculation
+    battery_data = None
+    total_cost = solar_cost
+    if include_battery:
+        battery_pricing = load_battery_pricing_data()
+        battery_cost = battery_pricing['avg_cost_per_kwh'] * battery_capacity_kwh
+        battery_incentive = battery_pricing.get('avg_incentive_per_kwh', 0) * battery_capacity_kwh
+        total_cost = solar_cost + battery_cost
+        battery_data = {
+            'included': True,
+            'capacity_kwh': battery_capacity_kwh,
+            'cost': round(battery_cost, 2),
+            'cost_per_kwh': battery_pricing['avg_cost_per_kwh'],
+            'cost_range': {
+                'min': battery_pricing['min_cost_per_kwh'],
+                'max': battery_pricing['max_cost_per_kwh']
+            },
+            'incentive': round(battery_incentive, 2),
+            'net_battery_cost': round(battery_cost - battery_incentive, 2),
+            'common_capacities': battery_pricing['common_capacities'],
+            'source': battery_pricing['source'],
+            'sample_size': battery_pricing['sample_size']
+        }
+    
+    federal_itc = total_cost * 0.30  # 30% federal tax credit applies to solar + battery
     
     return jsonify({
         'source': 'california_dg_stats',
@@ -392,11 +546,13 @@ def get_pricing():
             'min': round(min_cost, 2),
             'max': round(max_cost, 2)
         },
-        'estimated_total_cost': round(estimated_total, 2),
+        'estimated_total_cost': round(solar_cost, 2),
+        'battery': battery_data,
+        'total_system_cost': round(total_cost, 2),
         'federal_tax_credit_30': round(federal_itc, 2),
-        'net_cost_after_federal': round(estimated_total - federal_itc, 2),
+        'net_cost_after_federal': round(total_cost - federal_itc, 2),
         'sample_size': len(local_data),
-        'note': 'Prices based on California DG Stats interconnection data (2020-2025)'
+        'note': 'Prices based on California DG Stats interconnection data (2020-2025)' + (' and SOMAH battery data' if include_battery else '')
     })
 
 
@@ -517,6 +673,76 @@ def get_utilities():
             {'code': 'SCE', 'name': 'Southern California Edison (SCE)'},
             {'code': 'SDGE', 'name': 'San Diego Gas & Electric (SDG&E)'}
         ]
+    })
+
+
+@app.route('/api/utility-by-zip', methods=['POST'])
+def get_utility_by_zip_endpoint():
+    """
+    Auto-detect utility provider based on ZIP code.
+    Returns the most common utility for that ZIP code from interconnection data.
+    """
+    data = request.json
+    zip_code = data.get('zip_code', '')
+
+    if not zip_code or len(str(zip_code).strip()) < 5:
+        return jsonify({'error': 'Valid 5-digit ZIP code required'}), 400
+
+    zip_str = str(zip_code).strip()[:5]
+
+    df = load_installer_data()
+    if df.empty:
+        return jsonify({
+            'detected': False,
+            'utility': None,
+            'message': 'No data available for utility detection'
+        })
+
+    matches = df[df['Service Zip'] == zip_str]
+
+    if matches.empty:
+        return jsonify({
+            'detected': False,
+            'utility': None,
+            'zip_code': zip_str,
+            'message': 'No utility data found for this ZIP code'
+        })
+
+    # Get the most common utility for this ZIP
+    utility_mode = matches['Utility'].mode()
+    if len(utility_mode) > 0:
+        utility_raw = str(utility_mode.iloc[0]).upper()
+        # Map to utility code
+        utility_code = None
+        utility_name = utility_raw
+
+        # Check for PG&E variations
+        if 'PGE' in utility_raw or 'PG&E' in utility_raw or 'PACIFIC GAS' in utility_raw:
+            utility_code = 'PGE'
+            utility_name = 'Pacific Gas & Electric (PG&E)'
+        # Check for SCE variations
+        elif 'SCE' in utility_raw or 'SOUTHERN CALIFORNIA EDISON' in utility_raw:
+            utility_code = 'SCE'
+            utility_name = 'Southern California Edison (SCE)'
+        # Check for SDG&E variations
+        elif 'SDGE' in utility_raw or 'SDG&E' in utility_raw or 'SAN DIEGO GAS' in utility_raw:
+            utility_code = 'SDGE'
+            utility_name = 'San Diego Gas & Electric (SDG&E)'
+
+        return jsonify({
+            'detected': True,
+            'utility_code': utility_code,
+            'utility_name': utility_name,
+            'zip_code': zip_str,
+            'confidence': len(matches),
+            'message': f'Detected {utility_name.split(" (")[0]} for your area'
+        })
+
+    return jsonify({
+        'detected': False,
+        'utility': None,
+        'zip_code': zip_str,
+        'message': 'Could not determine utility for this ZIP code'
     })
 
 

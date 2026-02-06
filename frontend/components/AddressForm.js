@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 
 const CALIFORNIA_CITIES = [
   'Los Angeles', 'San Diego', 'San Jose', 'San Francisco', 'Fresno', 'Sacramento',
@@ -16,6 +16,9 @@ const CALIFORNIA_CITIES = [
   'Mountain View', 'Palo Alto', 'Sunnyvale', 'Cupertino', 'Santa Cruz', 'Monterey'
 ].sort();
 
+// Unique list (removes duplicate Sunnyvale)
+const UNIQUE_CA_CITIES = [...new Set(CALIFORNIA_CITIES)];
+
 export default function AddressForm({ onSubmit, loading }) {
   const [formData, setFormData] = useState({
     streetAddress: '',
@@ -26,6 +29,8 @@ export default function AddressForm({ onSubmit, loading }) {
   });
   const [utilities, setUtilities] = useState([]);
   const [errors, setErrors] = useState({});
+  const [detectedUtility, setDetectedUtility] = useState(null);
+  const [detectingUtility, setDetectingUtility] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/api/utilities`)
@@ -40,6 +45,50 @@ export default function AddressForm({ onSubmit, loading }) {
       });
   }, []);
 
+  // Auto-detect utility when ZIP code is 5 digits
+  useEffect(() => {
+    const zipCode = formData.zipCode.trim();
+
+    // Only detect if ZIP is exactly 5 digits and utility not already selected
+    if (zipCode.length === 5 && /^\d{5}$/.test(zipCode) && !formData.utility) {
+      setDetectingUtility(true);
+      setDetectedUtility(null);
+
+      fetch(`${API_URL}/api/utility-by-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zip_code: zipCode })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.detected && data.utility_code) {
+            // Pre-select the utility
+            setFormData(prev => ({ ...prev, utility: data.utility_code }));
+            setDetectedUtility({
+              code: data.utility_code,
+              name: data.utility_name,
+              message: `We detected ${data.utility_name.split(' (')[0]} for your area`
+            });
+            // Clear utility error if present
+            if (errors.utility) {
+              setErrors(prev => ({ ...prev, utility: null }));
+            }
+          }
+        })
+        .catch(err => {
+          console.error('Utility detection failed:', err);
+        })
+        .finally(() => {
+          setDetectingUtility(false);
+        });
+    }
+
+    // Clear detected utility message if ZIP changes
+    if (zipCode.length !== 5) {
+      setDetectedUtility(null);
+    }
+  }, [formData.zipCode]);
+
   const validateForm = () => {
     const newErrors = {};
     
@@ -47,7 +96,7 @@ export default function AddressForm({ onSubmit, loading }) {
       newErrors.streetAddress = 'Street address is required';
     }
     
-    if (!formData.city) {
+    if (!formData.city.trim()) {
       newErrors.city = 'City is required';
     }
     
@@ -104,49 +153,54 @@ export default function AddressForm({ onSubmit, loading }) {
             value={formData.streetAddress}
             onChange={(e) => handleChange('streetAddress', e.target.value)}
             placeholder="123 Main Street"
-            className={errors.streetAddress ? 'border-red-400 focus:border-red-500' : ''}
+            className={errors.streetAddress ? 'error' : ''}
             disabled={loading}
           />
           {errors.streetAddress && (
-            <p className="text-red-500 text-sm mt-2">{errors.streetAddress}</p>
+            <p className="form-error">{errors.streetAddress}</p>
           )}
+          <p className="form-helper trust-message">Your address is only used to analyze your roof - we never share or sell your data.</p>
         </div>
 
-        {/* City */}
+        {/* City - Autocomplete Input */}
         <div className="form-group">
           <label htmlFor="city">City</label>
-          <select
+          <input
+            type="text"
             id="city"
+            list="city-options"
             value={formData.city}
             onChange={(e) => handleChange('city', e.target.value)}
-            className={`form-select ${errors.city ? 'border-red-400 focus:border-red-500' : ''}`}
+            placeholder="Start typing your city..."
+            className={errors.city ? 'error' : ''}
             disabled={loading}
-          >
-            <option value="">Select your city</option>
-            {CALIFORNIA_CITIES.map(city => (
-              <option key={city} value={city}>{city}</option>
+            autoComplete="off"
+          />
+          <datalist id="city-options">
+            {UNIQUE_CA_CITIES.map(city => (
+              <option key={city} value={city} />
             ))}
-          </select>
+          </datalist>
+          <p className="form-helper">California cities only</p>
           {errors.city && (
-            <p className="text-red-500 text-sm mt-2">{errors.city}</p>
+            <p className="form-error">{errors.city}</p>
           )}
         </div>
 
         {/* State and ZIP Row */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <div>
-            <label htmlFor="state" className="form-label">State</label>
+        <div className="form-row">
+          <div className="form-group form-group-half">
+            <label htmlFor="state">State</label>
             <input
               type="text"
               id="state"
               value="California"
-              className="form-input bg-gray-50 text-gray-500"
               disabled
             />
           </div>
-          
-          <div>
-            <label htmlFor="zipCode" className="form-label">ZIP Code</label>
+
+          <div className="form-group form-group-half">
+            <label htmlFor="zipCode">ZIP Code</label>
             <input
               type="text"
               id="zipCode"
@@ -154,11 +208,11 @@ export default function AddressForm({ onSubmit, loading }) {
               onChange={(e) => handleChange('zipCode', e.target.value.replace(/\D/g, '').slice(0, 5))}
               placeholder="94041"
               maxLength={5}
-              className={`form-input ${errors.zipCode ? 'border-red-400 focus:border-red-500' : ''}`}
+              className={errors.zipCode ? 'error' : ''}
               disabled={loading}
             />
             {errors.zipCode && (
-              <p className="text-red-500 text-sm mt-2">{errors.zipCode}</p>
+              <p className="form-error">{errors.zipCode}</p>
             )}
           </div>
         </div>
@@ -166,20 +220,36 @@ export default function AddressForm({ onSubmit, loading }) {
         {/* Utility Provider */}
         <div className="form-group">
           <label htmlFor="utility">Utility Provider</label>
-          <select
-            id="utility"
-            value={formData.utility}
-            onChange={(e) => handleChange('utility', e.target.value)}
-            className={`form-select ${errors.utility ? 'border-red-400 focus:border-red-500' : ''}`}
-            disabled={loading}
-          >
-            <option value="">Select your utility provider</option>
-            {utilities.map(u => (
-              <option key={u.code} value={u.code}>{u.name}</option>
-            ))}
-          </select>
+          <div className="utility-select-wrapper">
+            <select
+              id="utility"
+              value={formData.utility}
+              onChange={(e) => {
+                handleChange('utility', e.target.value);
+                // Clear detected message if user manually changes
+                if (detectedUtility && e.target.value !== detectedUtility.code) {
+                  setDetectedUtility(null);
+                }
+              }}
+              className={`form-select ${errors.utility ? 'error' : ''} ${detectedUtility ? 'auto-detected' : ''}`}
+              disabled={loading || detectingUtility}
+            >
+              <option value="">Select your utility provider</option>
+              {utilities.map(u => (
+                <option key={u.code} value={u.code}>{u.name}</option>
+              ))}
+            </select>
+            {detectingUtility && (
+              <span className="detecting-spinner">Detecting...</span>
+            )}
+          </div>
+          {detectedUtility && (
+            <p className="form-helper detected-utility-message">
+              <span className="detected-icon">✓</span> {detectedUtility.message}
+            </p>
+          )}
           {errors.utility && (
-            <p className="text-red-500 text-sm mt-2">{errors.utility}</p>
+            <p className="form-error">{errors.utility}</p>
           )}
         </div>
 
