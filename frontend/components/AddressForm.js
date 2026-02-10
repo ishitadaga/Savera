@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 
@@ -31,6 +31,10 @@ export default function AddressForm({ onSubmit, loading }) {
   const [errors, setErrors] = useState({});
   const [detectedUtility, setDetectedUtility] = useState(null);
   const [detectingUtility, setDetectingUtility] = useState(false);
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
+  const [filteredCities, setFilteredCities] = useState([]);
+  const cityInputRef = useRef(null);
+  const cityDropdownRef = useRef(null);
 
   useEffect(() => {
     fetch(`${API_URL}/api/utilities`)
@@ -88,6 +92,41 @@ export default function AddressForm({ onSubmit, loading }) {
       setDetectedUtility(null);
     }
   }, [formData.zipCode]);
+
+  // Filter cities based on input
+  useEffect(() => {
+    const searchTerm = formData.city.toLowerCase().trim();
+    if (searchTerm.length > 0) {
+      const matches = UNIQUE_CA_CITIES.filter(city =>
+        city.toLowerCase().includes(searchTerm)
+      ).slice(0, 8); // Limit to 8 suggestions
+      setFilteredCities(matches);
+    } else {
+      setFilteredCities([]);
+    }
+  }, [formData.city]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        cityDropdownRef.current &&
+        !cityDropdownRef.current.contains(event.target) &&
+        cityInputRef.current &&
+        !cityInputRef.current.contains(event.target)
+      ) {
+        setShowCityDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleCitySelect = (city) => {
+    handleChange('city', city);
+    setShowCityDropdown(false);
+  };
 
   const validateForm = () => {
     const newErrors = {};
@@ -162,25 +201,36 @@ export default function AddressForm({ onSubmit, loading }) {
           <p className="form-helper trust-message">Your address is only used to analyze your roof - we never share or sell your data.</p>
         </div>
 
-        {/* City - Autocomplete Input */}
-        <div className="form-group">
+        {/* City - Custom Autocomplete Dropdown */}
+        <div className="form-group city-autocomplete-wrapper">
           <label htmlFor="city">City</label>
-          <input
-            type="text"
-            id="city"
-            list="city-options"
-            value={formData.city}
-            onChange={(e) => handleChange('city', e.target.value)}
-            placeholder="Start typing your city..."
-            className={errors.city ? 'error' : ''}
-            disabled={loading}
-            autoComplete="off"
-          />
-          <datalist id="city-options">
-            {UNIQUE_CA_CITIES.map(city => (
-              <option key={city} value={city} />
-            ))}
-          </datalist>
+          <div className="city-input-container">
+            <input
+              ref={cityInputRef}
+              type="text"
+              id="city"
+              value={formData.city}
+              onChange={(e) => handleChange('city', e.target.value)}
+              onFocus={() => setShowCityDropdown(true)}
+              placeholder="Start typing your city..."
+              className={errors.city ? 'error' : ''}
+              disabled={loading}
+              autoComplete="off"
+            />
+            {showCityDropdown && filteredCities.length > 0 && (
+              <ul ref={cityDropdownRef} className="city-dropdown">
+                {filteredCities.map(city => (
+                  <li
+                    key={city}
+                    onClick={() => handleCitySelect(city)}
+                    className="city-dropdown-item"
+                  >
+                    {city}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <p className="form-helper">California cities only</p>
           {errors.city && (
             <p className="form-error">{errors.city}</p>
