@@ -98,20 +98,74 @@ def get_business_rating_from_places(business_name, city=None, state=None):
         return None, None, None
 
 
+def download_data_if_missing():
+    """Download CA DG Stats data if not present."""
+    import zipfile
+    import io
+
+    # Look for any existing data folder
+    existing = list(DATA_DIR.glob('Interconnection_Applications_Dataset*'))
+    if existing:
+        return existing[0]
+
+    # Try to download
+    url = "https://www.californiadgstats.ca.gov/download/interconnection_rule21_applications/"
+    print(f"📥 Downloading CA DG Stats data from {url}...")
+
+    try:
+        response = requests.get(url, timeout=120, allow_redirects=True)
+        response.raise_for_status()
+
+        # Check content type
+        content_type = response.headers.get('content-type', '')
+
+        if 'zip' in content_type or response.content[:4] == b'PK\x03\x04':
+            # It's a zip file
+            print("📦 Extracting zip file...")
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+                zf.extractall(DATA_DIR)
+            print("✓ Data extracted successfully")
+
+            # Find extracted folder
+            extracted = list(DATA_DIR.glob('Interconnection_Applications_Dataset*'))
+            if extracted:
+                return extracted[0]
+        else:
+            print("⚠️ Unexpected response format. Using default pricing.")
+
+    except Exception as e:
+        print(f"⚠️ Could not download data: {e}")
+        print("   App will use default pricing estimates.")
+
+    return None
+
+
 def load_installer_data():
     """Load and process installer data from interconnection datasets."""
     global _installer_data
     if _installer_data is not None:
         return _installer_data
-    
+
+    # Try to download data if missing
+    data_folder = download_data_if_missing()
+    if data_folder is None:
+        data_folder = DATA_DIR / 'Interconnection_Applications_Dataset_2025-11-30'
+
     datasets = []
-    data_folder = DATA_DIR / 'Interconnection_Applications_Dataset_2025-11-30'
-    
+
+    # Try specific files first, then fall back to any CSV in the folder
     csv_files = [
         'PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv',
         'SCE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv',
         'SDGE_Interconnection_Applications_Dataset_Historical-Nov2025.csv',
     ]
+
+    # If specific files don't exist, try to find any CSV files
+    if data_folder.exists():
+        found_files = list(data_folder.glob('*Interconnection*.csv'))
+        if found_files:
+            csv_files = [f.name for f in found_files]
+            print(f"Found CSV files: {csv_files}")
     
     columns_to_load = [
         'Application Id', 'Utility', 'Service City', 'Service Zip', 'Service County',

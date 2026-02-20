@@ -36,17 +36,11 @@ Go to your Railway project → Variables → Add:
 | `GOOGLE_SOLAR_API_KEY` | Your Google API key |
 | `ALLOWED_ORIGINS` | `https://your-app.vercel.app` (update after Vercel deploy) |
 
-### 1.4 Upload Data Files
-The CSV data files are not in git. You need to upload them:
+### 1.4 Data Files (Automatic)
+The app automatically downloads CA DG Stats data on first startup from:
+`https://www.californiadgstats.ca.gov/download/interconnection_rule21_applications/`
 
-```bash
-# In Railway shell or via volume
-# Upload these files to the backend:
-# - Interconnection_Applications_Dataset_2025-11-30/
-# - SOMAH_working_data_set_2026-01-19.csv
-```
-
-**Alternative**: Modify app.py to load data from a cloud storage URL.
+If download fails, the app uses default pricing estimates.
 
 ### 1.5 Get Your Backend URL
 After deployment, Railway gives you a URL like:
