@@ -38,7 +38,10 @@ CORS(app, origins=ALLOWED_ORIGINS)
 
 # Configuration
 GOOGLE_SOLAR_API_KEY = os.environ.get('GOOGLE_SOLAR_API_KEY', '')
-DATA_DIR = Path(__file__).parent.parent
+# DATA_DIR: Use backend folder itself on Railway, or parent for local dev
+DATA_DIR = Path(__file__).parent
+if not (DATA_DIR / 'app.py').exists():
+    DATA_DIR = Path(__file__).parent.parent
 
 # Cache for loaded data
 _installer_data = None
@@ -324,7 +327,12 @@ def load_battery_pricing_data():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
-    return jsonify({'status': 'healthy', 'api_key_configured': bool(GOOGLE_SOLAR_API_KEY)})
+    return jsonify({
+        'status': 'healthy',
+        'api_key_configured': bool(GOOGLE_SOLAR_API_KEY),
+        'data_dir': str(DATA_DIR),
+        'python_version': os.sys.version
+    })
 
 
 @app.route('/api/solar-potential', methods=['POST'])
