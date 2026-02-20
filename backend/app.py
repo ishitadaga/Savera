@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # CORS configuration - allow frontend origins
-ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
-CORS(app, origins=ALLOWED_ORIGINS)
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,https://saveraa-six.vercel.app').split(',')
+CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True, allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
 
 # Configuration
 GOOGLE_SOLAR_API_KEY = os.environ.get('GOOGLE_SOLAR_API_KEY', '')
