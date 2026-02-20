@@ -86,3 +86,17 @@ htmlcov/
 *.bak
 *.tmp
 *.temp
+
+# Data files (large datasets - download separately)
+*.csv
+*.zip
+Interconnection_Applications_Dataset*/
+SOMAH_*.csv
+
+# Virtual environments (all variations)
+.venv*/
+venv*/
+.venv-test/
+
+# Vercel
+.vercel/
