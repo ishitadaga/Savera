@@ -1096,8 +1096,14 @@ def get_building_imagery():
         return jsonify({'error': str(e)}), 500
 
 
+# Download data files at module load time (works with gunicorn)
+print("📥 Downloading data files from GitHub releases...")
+download_data_files()
+print("📊 Loading installer data...")
+load_installer_data()
+print("✅ Data loading complete!")
+
+
 if __name__ == '__main__':
-    print("Loading installer data...")
-    load_installer_data()
     print("Starting Solar App Backend on port 5001...")
     app.run(debug=False, port=5001, host='0.0.0.0')
