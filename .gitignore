@@ -87,11 +87,14 @@ htmlcov/
 *.tmp
 *.temp
 
-# Data files (large datasets - download separately)
+# Data files (large datasets)
 *.csv
 *.zip
 Interconnection_Applications_Dataset*/
 SOMAH_*.csv
+
+# But allow compressed data in backend (tracked by Git LFS)
+!backend/data/*.gz
 
 # Virtual environments (all variations)
 .venv*/
