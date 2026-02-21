@@ -291,6 +291,48 @@ def health_check():
     })
 
 
+@app.route('/api/debug', methods=['GET'])
+def debug_info():
+    """Debug endpoint to check data loading status."""
+    import os as os_module
+
+    data_folder = Path(__file__).parent / 'data'
+
+    # Check what files exist
+    files_info = []
+    if data_folder.exists():
+        for f in data_folder.iterdir():
+            try:
+                size = f.stat().st_size
+                # Check if it's an LFS pointer (small file with specific content)
+                is_lfs_pointer = False
+                if size < 200:
+                    with open(f, 'rb') as file:
+                        content = file.read(50)
+                        is_lfs_pointer = b'version https://git-lfs' in content
+                files_info.append({
+                    'name': f.name,
+                    'size_bytes': size,
+                    'size_mb': round(size / 1024 / 1024, 2),
+                    'is_lfs_pointer': is_lfs_pointer
+                })
+            except Exception as e:
+                files_info.append({'name': f.name, 'error': str(e)})
+
+    # Check installer data
+    installer_data = load_installer_data()
+    installer_count = len(installer_data) if installer_data is not None else 0
+
+    return jsonify({
+        'data_folder': str(data_folder),
+        'data_folder_exists': data_folder.exists(),
+        'files': files_info,
+        'installer_records_loaded': installer_count,
+        'cwd': os_module.getcwd(),
+        'app_file_location': str(Path(__file__).parent)
+    })
+
+
 @app.route('/api/solar-potential', methods=['POST'])
 def get_solar_potential():
     """
