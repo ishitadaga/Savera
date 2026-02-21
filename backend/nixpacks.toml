@@ -1,8 +1,15 @@
 [phases.setup]
-nixPkgs = ["python311", "gcc", "git-lfs"]
+nixPkgs = ["python311", "gcc", "curl"]
 
 [phases.install]
-cmds = ["git lfs install", "git lfs pull", "pip install -r requirements.txt"]
+cmds = [
+    "pip install -r requirements.txt",
+    "mkdir -p data",
+    "curl -L -o data/PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz https://github.com/ishitadaga/Savera/releases/download/data-v1/PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz",
+    "curl -L -o data/SCE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz https://github.com/ishitadaga/Savera/releases/download/data-v1/SCE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz",
+    "curl -L -o data/SDGE_Interconnection_Applications_Dataset_Historical-Nov2025.csv.gz https://github.com/ishitadaga/Savera/releases/download/data-v1/SDGE_Interconnection_Applications_Dataset_Historical-Nov2025.csv.gz",
+    "ls -lh data/"
+]
 
 [start]
 cmd = "gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120"
