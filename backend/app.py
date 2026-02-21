@@ -13,6 +13,7 @@ import numpy as np
 import requests
 import os
 import logging
+import threading
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -48,6 +49,7 @@ _pricing_data = None
 _battery_pricing_data = None
 _places_rating_cache = {}  # Cache for Places API ratings
 _data_downloaded = False
+_data_loading_status = 'not_started'  # not_started, downloading, loading, ready, error
 
 # Use /tmp for downloaded data (won't conflict with git LFS pointers)
 DOWNLOAD_DATA_DIR = Path('/tmp/savera_data')
@@ -106,11 +108,12 @@ def get_business_rating_from_places(business_name, city=None, state=None):
 
 def download_data_files():
     """Download data files to /tmp if they're missing."""
-    global _data_downloaded
+    global _data_downloaded, _data_loading_status
 
     if _data_downloaded:
-        return
+        return True
 
+    _data_loading_status = 'downloading'
     DOWNLOAD_DATA_DIR.mkdir(exist_ok=True)
 
     # Files to download with their URLs
@@ -127,11 +130,11 @@ def download_data_files():
         file_path = DOWNLOAD_DATA_DIR / filename
 
         if file_path.exists() and file_path.stat().st_size > 1000000:
-            print(f"✓ {filename} already exists ({file_path.stat().st_size / 1024 / 1024:.1f} MB)")
+            logger.info(f"✓ {filename} already exists ({file_path.stat().st_size / 1024 / 1024:.1f} MB)")
             continue
 
         try:
-            print(f"📥 Downloading {filename}...")
+            logger.info(f"📥 Downloading {filename}...")
             response = requests.get(url, timeout=600, stream=True)
             response.raise_for_status()
 
@@ -139,11 +142,33 @@ def download_data_files():
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            print(f"✓ Downloaded {filename} ({file_path.stat().st_size / 1024 / 1024:.1f} MB)")
+            logger.info(f"✓ Downloaded {filename} ({file_path.stat().st_size / 1024 / 1024:.1f} MB)")
         except Exception as e:
-            print(f"❌ Failed to download {filename}: {e}")
+            logger.error(f"❌ Failed to download {filename}: {e}")
+            _data_loading_status = 'error'
+            return False
 
     _data_downloaded = True
+    return True
+
+
+def load_data_background():
+    """Background thread to download and load data."""
+    global _data_loading_status
+    try:
+        logger.info("🚀 Starting background data download...")
+        if download_data_files():
+            _data_loading_status = 'loading'
+            logger.info("📊 Loading installer data into memory...")
+            load_installer_data()
+            _data_loading_status = 'ready'
+            logger.info("✅ Data loading complete!")
+        else:
+            _data_loading_status = 'error'
+            logger.error("❌ Data download failed")
+    except Exception as e:
+        _data_loading_status = 'error'
+        logger.exception(f"❌ Background data loading failed: {e}")
 
 
 def load_installer_data():
@@ -376,6 +401,7 @@ def debug_info():
         'data_folder_exists': data_folder.exists(),
         'files': files_info,
         'installer_records_loaded': installer_count,
+        'data_loading_status': _data_loading_status,
         'cwd': os_module.getcwd(),
         'app_file_location': str(Path(__file__).parent)
     })
@@ -687,15 +713,31 @@ def get_installers():
     """
     Get installers that have completed projects in the specified area.
     """
+    # Check if data is still loading
+    if _data_loading_status in ('not_started', 'downloading', 'loading'):
+        return jsonify({
+            'installers': [],
+            'message': f'Installer data is loading ({_data_loading_status}). Please try again in a moment.',
+            'loading': True,
+            'status': _data_loading_status
+        }), 202  # 202 Accepted - request is being processed
+
+    if _data_loading_status == 'error':
+        return jsonify({
+            'installers': [],
+            'message': 'Failed to load installer data. Please try again later.',
+            'error': True
+        }), 503  # 503 Service Unavailable
+
     data = request.json
     zip_code = data.get('zip_code', '')
     city = data.get('city', '')
     county = data.get('county', '')
     utility = data.get('utility', '')
     limit = data.get('limit', 20)
-    
+
     df = load_installer_data()
-    
+
     if df.empty:
         return jsonify({
             'installers': [],
@@ -1096,12 +1138,10 @@ def get_building_imagery():
         return jsonify({'error': str(e)}), 500
 
 
-# Download data files at module load time (works with gunicorn)
-print("📥 Downloading data files from GitHub releases...")
-download_data_files()
-print("📊 Loading installer data...")
-load_installer_data()
-print("✅ Data loading complete!")
+# Start data download in background thread (allows server to start immediately)
+_data_thread = threading.Thread(target=load_data_background, daemon=True)
+_data_thread.start()
+logger.info("🌐 Server starting - data loading in background...")
 
 
 if __name__ == '__main__':
