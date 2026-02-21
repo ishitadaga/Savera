@@ -471,7 +471,7 @@ def get_data_layers():
 def get_pricing():
     """
     Calculate pricing based on system size and regional averages from California data.
-    Now includes optional battery storage pricing.
+    Uses pre-aggregated installer summary for cost estimates.
     """
     data = request.json
     zip_code = data.get('zip_code', '')
@@ -479,80 +479,39 @@ def get_pricing():
     utility = data.get('utility', '')
     include_battery = data.get('include_battery', False)
     battery_capacity_kwh = data.get('battery_capacity_kwh', 13.5)  # Default Tesla Powerwall size
-    
-    df = load_installer_data()
-    
-    if df.empty:
-        # Return default California averages if no data
-        avg_cost_per_watt = 3.50
-        solar_cost = avg_cost_per_watt * system_size_kw * 1000
-        
-        # Battery pricing
-        battery_data = None
-        total_cost = solar_cost
-        if include_battery:
-            battery_pricing = load_battery_pricing_data()
-            battery_cost = battery_pricing['avg_cost_per_kwh'] * battery_capacity_kwh
-            battery_incentive = battery_pricing.get('avg_incentive_per_kwh', 0) * battery_capacity_kwh
-            total_cost = solar_cost + battery_cost
-            battery_data = {
-                'included': True,
-                'capacity_kwh': battery_capacity_kwh,
-                'cost': round(battery_cost, 2),
-                'cost_per_kwh': battery_pricing['avg_cost_per_kwh'],
-                'incentive': round(battery_incentive, 2),
-                'net_battery_cost': round(battery_cost - battery_incentive, 2)
-            }
-        
-        # Note: Federal ITC (30%) expired Dec 31, 2025
 
-        return jsonify({
-            'source': 'default',
-            'avg_cost_per_watt': avg_cost_per_watt,
-            'estimated_total_cost': round(solar_cost, 2),
-            'net_cost': round(total_cost, 2),
-            'sample_size': 0,
-            'battery': battery_data,
-            'total_system_cost': round(total_cost, 2),
-            'note': 'Federal ITC (30%) expired Dec 31, 2025'
-        })
-    
-    # Filter by zip code or county
-    zip_str = str(zip_code)[:5]
-    
-    # Try to find local data
-    local_data = df[df['Service Zip'] == zip_str].copy()
-    
-    if len(local_data) < 10:
-        # Expand to utility territory
-        if utility:
-            local_data = df[df['Utility'].str.contains(utility, case=False, na=False)].copy()
-        else:
-            local_data = df.copy()
-    
-    # Filter to recent data (2023-2025) and valid cost data
-    local_data = local_data[pd.to_numeric(local_data['Cost/Watt'], errors='coerce').notna()]
-    local_data['Cost/Watt'] = pd.to_numeric(local_data['Cost/Watt'], errors='coerce')
-    
-    # Remove outliers (top and bottom 5%)
-    if len(local_data) > 20:
-        lower = local_data['Cost/Watt'].quantile(0.05)
-        upper = local_data['Cost/Watt'].quantile(0.95)
-        local_data = local_data[(local_data['Cost/Watt'] >= lower) & (local_data['Cost/Watt'] <= upper)]
-    
-    if len(local_data) > 0:
-        avg_cost_per_watt = local_data['Cost/Watt'].mean()
-        median_cost_per_watt = local_data['Cost/Watt'].median()
-        min_cost = local_data['Cost/Watt'].min()
-        max_cost = local_data['Cost/Watt'].max()
-    else:
-        avg_cost_per_watt = 3.50
-        median_cost_per_watt = 3.40
-        min_cost = 2.50
-        max_cost = 5.00
-    
+    # Load summary data
+    summary = load_installer_summary()
+
+    # Get cost per watt from summary
+    avg_cost_per_watt = 3.50  # Default
+    sample_size = 0
+    source = 'default'
+
+    if summary:
+        zip_str = str(zip_code)[:5] if zip_code else ''
+        zip_installers = summary.get('zip_installers', [])
+
+        # Find installers for this ZIP
+        local_installers = [i for i in zip_installers if i.get('zip') == zip_str]
+
+        if not local_installers and utility:
+            # Try utility-wide
+            local_installers = [i for i in zip_installers if utility.upper() in str(i.get('utility', '')).upper()]
+
+        if not local_installers:
+            # Use top installers statewide
+            local_installers = summary.get('top_installers', [])
+
+        # Calculate average from installers with valid cost data
+        costs = [i['avg_cost_per_watt'] for i in local_installers if i.get('avg_cost_per_watt')]
+        if costs:
+            avg_cost_per_watt = sum(costs) / len(costs)
+            sample_size = len(costs)
+            source = 'california_data'
+
     solar_cost = avg_cost_per_watt * system_size_kw * 1000
-    
+
     # Battery pricing calculation
     battery_data = None
     total_cost = solar_cost
@@ -576,25 +535,22 @@ def get_pricing():
             'source': battery_pricing['source'],
             'sample_size': battery_pricing['sample_size']
         }
-    
+
     # Note: Federal ITC (30%) expired Dec 31, 2025
 
+    zip_str = str(zip_code)[:5] if zip_code else ''
+
     return jsonify({
-        'source': 'california_dg_stats',
+        'source': source,
         'zip_code': zip_str,
         'utility': utility or get_utility_from_zip(zip_str),
         'system_size_kw': system_size_kw,
         'avg_cost_per_watt': round(avg_cost_per_watt, 2),
-        'median_cost_per_watt': round(median_cost_per_watt, 2),
-        'cost_range': {
-            'min': round(min_cost, 2),
-            'max': round(max_cost, 2)
-        },
         'estimated_total_cost': round(solar_cost, 2),
         'battery': battery_data,
         'total_system_cost': round(total_cost, 2),
         'net_cost': round(total_cost, 2),
-        'sample_size': len(local_data),
+        'sample_size': sample_size,
         'note': 'Prices based on California DG Stats interconnection data (2020-2025). Federal ITC (30%) expired Dec 31, 2025.' + (' Includes SOMAH battery data.' if include_battery else '')
     })
 
