@@ -335,7 +335,7 @@ def health_check():
 
 @app.route('/api/debug', methods=['GET'])
 def debug_info():
-    """Debug endpoint to check data loading status."""
+    """Debug endpoint to check data loading status (doesn't trigger download)."""
     import os as os_module
 
     data_folder = Path(__file__).parent / 'data'
@@ -361,9 +361,8 @@ def debug_info():
             except Exception as e:
                 files_info.append({'name': f.name, 'error': str(e)})
 
-    # Check installer data
-    installer_data = load_installer_data()
-    installer_count = len(installer_data) if installer_data is not None else 0
+    # Check installer data WITHOUT triggering download
+    installer_count = len(_installer_data) if _installer_data is not None else 'not_loaded_yet'
 
     return jsonify({
         'data_folder': str(data_folder),
@@ -373,6 +372,22 @@ def debug_info():
         'cwd': os_module.getcwd(),
         'app_file_location': str(Path(__file__).parent)
     })
+
+
+@app.route('/api/load-data', methods=['POST'])
+def trigger_data_load():
+    """Manually trigger data loading (downloads files if needed)."""
+    try:
+        data = load_installer_data()
+        return jsonify({
+            'success': True,
+            'records_loaded': len(data) if data is not None else 0
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/solar-potential', methods=['POST'])
