@@ -13,7 +13,6 @@ import numpy as np
 import requests
 import os
 import logging
-import threading
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -48,11 +47,10 @@ _installer_data = None
 _pricing_data = None
 _battery_pricing_data = None
 _places_rating_cache = {}  # Cache for Places API ratings
-_data_downloaded = False
-_data_loading_status = 'not_started'  # not_started, downloading, loading, ready, error
+_data_loading_status = 'not_started'  # not_started, loading, ready, error
 
-# Use /tmp for downloaded data (won't conflict with git LFS pointers)
-DOWNLOAD_DATA_DIR = Path('/tmp/savera_data')
+# Pre-aggregated installer summary (committed to git, ~0.5MB)
+INSTALLER_SUMMARY_FILE = Path(__file__).parent / 'data' / 'installer_summary.json.gz'
 
 
 def get_business_rating_from_places(business_name, city=None, state=None):
@@ -106,150 +104,57 @@ def get_business_rating_from_places(business_name, city=None, state=None):
         return None, None, None
 
 
-def download_data_files():
-    """Download data files to /tmp if they're missing."""
-    global _data_downloaded, _data_loading_status
-
-    if _data_downloaded:
-        return True
-
-    _data_loading_status = 'downloading'
-    DOWNLOAD_DATA_DIR.mkdir(exist_ok=True)
-
-    # Files to download with their URLs
-    files = {
-        'PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz':
-            'https://github.com/ishitadaga/Savera/releases/download/data-v1/PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz',
-        'SCE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz':
-            'https://github.com/ishitadaga/Savera/releases/download/data-v1/SCE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz',
-        'SDGE_Interconnection_Applications_Dataset_Historical-Nov2025.csv.gz':
-            'https://github.com/ishitadaga/Savera/releases/download/data-v1/SDGE_Interconnection_Applications_Dataset_Historical-Nov2025.csv.gz',
-    }
-
-    for filename, url in files.items():
-        file_path = DOWNLOAD_DATA_DIR / filename
-
-        if file_path.exists() and file_path.stat().st_size > 1000000:
-            logger.info(f"✓ {filename} already exists ({file_path.stat().st_size / 1024 / 1024:.1f} MB)")
-            continue
-
-        try:
-            logger.info(f"📥 Downloading {filename}...")
-            response = requests.get(url, timeout=600, stream=True)
-            response.raise_for_status()
-
-            with open(file_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-            logger.info(f"✓ Downloaded {filename} ({file_path.stat().st_size / 1024 / 1024:.1f} MB)")
-        except Exception as e:
-            logger.error(f"❌ Failed to download {filename}: {e}")
-            _data_loading_status = 'error'
-            return False
-
-    _data_downloaded = True
-    return True
-
-
-def load_data_background():
-    """Background thread to download and load data."""
-    global _data_loading_status
-    try:
-        logger.info("🚀 Starting background data download...")
-        if download_data_files():
-            _data_loading_status = 'loading'
-            logger.info("📊 Loading installer data into memory...")
-            load_installer_data()
-            _data_loading_status = 'ready'
-            logger.info("✅ Data loading complete!")
-        else:
-            _data_loading_status = 'error'
-            logger.error("❌ Data download failed")
-    except Exception as e:
-        _data_loading_status = 'error'
-        logger.exception(f"❌ Background data loading failed: {e}")
-
-
-def load_installer_data():
-    """Load and process installer data from compressed CSV files."""
-    global _installer_data
+def load_installer_summary():
+    """Load the pre-aggregated installer summary from JSON file."""
+    global _installer_data, _data_loading_status
     import gzip
+    import json
 
     if _installer_data is not None:
         return _installer_data
 
-    # Download data if needed
-    download_data_files()
+    _data_loading_status = 'loading'
 
-    # Data is stored in /tmp/savera_data as gzipped files
-    data_folder = DOWNLOAD_DATA_DIR
+    if not INSTALLER_SUMMARY_FILE.exists():
+        logger.error(f"❌ Installer summary file not found: {INSTALLER_SUMMARY_FILE}")
+        _data_loading_status = 'error'
+        return None
 
-    datasets = []
+    try:
+        logger.info(f"📖 Loading installer summary from {INSTALLER_SUMMARY_FILE}...")
+        with gzip.open(INSTALLER_SUMMARY_FILE, 'rt', encoding='utf-8') as f:
+            data = json.load(f)
 
-    # Compressed data files
-    gz_files = [
-        'PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz',
-        'SCE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz',
-        'SDGE_Interconnection_Applications_Dataset_Historical-Nov2025.csv.gz',
-    ]
+        _installer_data = {
+            'zip_installers': data.get('zip_installers', []),
+            'top_installers': data.get('top_installers', []),
+            'zip_to_utility': data.get('zip_to_utility', {}),
+            'metadata': data.get('metadata', {})
+        }
 
-    columns_to_load = [
-        'Application Id', 'Utility', 'Service City', 'Service Zip', 'Service County',
-        'System Size DC', 'System Size AC', 'Total System Cost', 'Cost/Watt',
-        'Installer Name', 'Installer Phone', 'Installer City', 'Installer State',
-        'Installer Zip', 'CSLB Number', 'App Approved Date', 'Customer Sector',
-        'Technology Type'
-    ]
+        logger.info(f"✓ Loaded {len(_installer_data['zip_installers'])} ZIP-installer entries")
+        logger.info(f"✓ Loaded {len(_installer_data['top_installers'])} top installers")
+        logger.info(f"✓ Loaded {len(_installer_data['zip_to_utility'])} ZIP-utility mappings")
 
-    print(f"📂 Looking for data in: {data_folder}")
+        _data_loading_status = 'ready'
+        return _installer_data
 
-    for gz_file in gz_files:
-        file_path = data_folder / gz_file
-        if file_path.exists():
-            try:
-                print(f"📖 Loading {gz_file}...")
-                with gzip.open(file_path, 'rt') as f:
-                    df = pd.read_csv(f, usecols=lambda x: x in columns_to_load,
-                                    low_memory=False)
-                datasets.append(df)
-                print(f"✓ Loaded {len(df)} records from {gz_file}")
-            except Exception as e:
-                print(f"❌ Error loading {gz_file}: {e}")
-        else:
-            print(f"⚠️ File not found: {file_path}")
-    
-    if datasets:
-        _installer_data = pd.concat(datasets, ignore_index=True)
-        # Clean data
-        _installer_data['Service Zip'] = _installer_data['Service Zip'].astype(str).str[:5]
-        _installer_data['Installer Zip'] = _installer_data['Installer Zip'].astype(str).str[:5]
-        # Keep all records - the data already includes solar installations
-        # Filter out rows without installer information
-        _installer_data = _installer_data[
-            _installer_data['Installer Name'].notna() & 
-            (_installer_data['Installer Name'] != '') &
-            (_installer_data['Installer Name'].str.lower() != 'nan')
-        ]
-        print(f"Total solar records loaded: {len(_installer_data)}")
-    else:
-        _installer_data = pd.DataFrame()
-    
-    return _installer_data
+    except Exception as e:
+        logger.exception(f"❌ Failed to load installer summary: {e}")
+        _data_loading_status = 'error'
+        return None
 
 
 def get_utility_from_zip(zip_code):
-    """Determine utility based on zip code from the data."""
-    df = load_installer_data()
-    if df.empty:
+    """Determine utility based on zip code from the pre-aggregated data."""
+    data = load_installer_summary()
+    if not data:
         return "Unknown"
-    
+
     zip_str = str(zip_code)[:5]
-    matches = df[df['Service Zip'] == zip_str]
-    
-    if not matches.empty:
-        return matches['Utility'].mode().iloc[0] if len(matches['Utility'].mode()) > 0 else "Unknown"
-    return "Unknown"
+    zip_to_utility = data.get('zip_to_utility', {})
+
+    return zip_to_utility.get(zip_str, "Unknown")
 
 
 def load_battery_pricing_data():
@@ -367,41 +272,27 @@ def health_check():
 
 @app.route('/api/debug', methods=['GET'])
 def debug_info():
-    """Debug endpoint to check data loading status (doesn't trigger download)."""
+    """Debug endpoint to check data loading status."""
     import os as os_module
 
-    data_folder = DOWNLOAD_DATA_DIR
+    # Check installer summary
+    summary_exists = INSTALLER_SUMMARY_FILE.exists()
+    summary_size = INSTALLER_SUMMARY_FILE.stat().st_size if summary_exists else 0
 
-    # Check what files exist
-    files_info = []
-    if data_folder.exists():
-        for f in data_folder.iterdir():
-            try:
-                size = f.stat().st_size
-                # Check if it's an LFS pointer (small file with specific content)
-                is_lfs_pointer = False
-                if size < 200:
-                    with open(f, 'rb') as file:
-                        content = file.read(50)
-                        is_lfs_pointer = b'version https://git-lfs' in content
-                files_info.append({
-                    'name': f.name,
-                    'size_bytes': size,
-                    'size_mb': round(size / 1024 / 1024, 2),
-                    'is_lfs_pointer': is_lfs_pointer
-                })
-            except Exception as e:
-                files_info.append({'name': f.name, 'error': str(e)})
-
-    # Check installer data WITHOUT triggering download
-    installer_count = len(_installer_data) if _installer_data is not None else 'not_loaded_yet'
+    # Get metadata from loaded data
+    metadata = {}
+    if _installer_data:
+        metadata = _installer_data.get('metadata', {})
+        metadata['zip_installers_count'] = len(_installer_data.get('zip_installers', []))
+        metadata['top_installers_count'] = len(_installer_data.get('top_installers', []))
+        metadata['zip_to_utility_count'] = len(_installer_data.get('zip_to_utility', {}))
 
     return jsonify({
-        'data_folder': str(data_folder),
-        'data_folder_exists': data_folder.exists(),
-        'files': files_info,
-        'installer_records_loaded': installer_count,
         'data_loading_status': _data_loading_status,
+        'summary_file': str(INSTALLER_SUMMARY_FILE),
+        'summary_exists': summary_exists,
+        'summary_size_mb': round(summary_size / 1024 / 1024, 2),
+        'metadata': metadata,
         'cwd': os_module.getcwd(),
         'app_file_location': str(Path(__file__).parent)
     })
@@ -712,9 +603,10 @@ def get_pricing():
 def get_installers():
     """
     Get installers that have completed projects in the specified area.
+    Uses pre-aggregated summary data for fast lookups.
     """
     # Check if data is still loading
-    if _data_loading_status in ('not_started', 'downloading', 'loading'):
+    if _data_loading_status in ('not_started', 'loading'):
         return jsonify({
             'installers': [],
             'message': f'Installer data is loading ({_data_loading_status}). Please try again in a moment.',
@@ -729,86 +621,70 @@ def get_installers():
             'error': True
         }), 503  # 503 Service Unavailable
 
-    data = request.json
-    zip_code = data.get('zip_code', '')
-    city = data.get('city', '')
-    county = data.get('county', '')
-    utility = data.get('utility', '')
-    limit = data.get('limit', 20)
+    req_data = request.json
+    zip_code = req_data.get('zip_code', '')
+    utility = req_data.get('utility', '')
+    limit = req_data.get('limit', 20)
 
-    df = load_installer_data()
-
-    if df.empty:
+    data = load_installer_summary()
+    if not data:
         return jsonify({
             'installers': [],
             'message': 'No installer data available'
         })
-    
-    # Filter data
-    filtered = df.copy()
-    
-    if zip_code:
-        zip_str = str(zip_code)[:5]
-        filtered = filtered[filtered['Service Zip'] == zip_str]
-    
-    if city and len(filtered) < 5:
-        filtered = df[df['Service City'].str.contains(city, case=False, na=False)]
-    
-    if county and len(filtered) < 5:
-        filtered = df[df['Service County'].str.contains(county, case=False, na=False)]
-    
-    if utility and len(filtered) < 5:
-        filtered = df[df['Utility'].str.contains(utility, case=False, na=False)]
-    
-    # If still no results, return top installers overall
-    if len(filtered) < 5:
-        filtered = df
-    
-    # Group by installer and calculate stats
-    installer_stats = filtered.groupby('Installer Name').agg({
-        'Application Id': 'count',
-        'Cost/Watt': lambda x: pd.to_numeric(x, errors='coerce').mean(),
-        'System Size DC': lambda x: pd.to_numeric(x, errors='coerce').mean(),
-        'Installer Phone': 'first',
-        'Installer City': 'first',
-        'Installer State': 'first',
-        'Installer Zip': 'first',
-        'CSLB Number': 'first'
-    }).reset_index()
-    
-    installer_stats.columns = [
-        'name', 'project_count', 'avg_cost_per_watt', 'avg_system_size_kw',
-        'phone', 'city', 'state', 'zip', 'cslb_license'
-    ]
-    
-    # Filter out entries without installer name
-    installer_stats = installer_stats[
-        installer_stats['name'].notna() & 
-        (installer_stats['name'] != '') &
-        (installer_stats['name'].str.lower() != 'nan')
-    ]
-    
+
+    zip_installers = data.get('zip_installers', [])
+    top_installers = data.get('top_installers', [])
+
+    # Find installers for the ZIP code
+    results = []
+    zip_str = str(zip_code)[:5] if zip_code else ''
+
+    if zip_str:
+        # Get installers that serve this ZIP
+        results = [i for i in zip_installers if i.get('zip') == zip_str]
+
+    # If not enough results, filter by utility
+    if len(results) < 5 and utility:
+        utility_installers = [i for i in zip_installers if utility.upper() in str(i.get('utility', '')).upper()]
+        # Add unique installers not already in results
+        existing_names = {r['name'] for r in results}
+        for inst in utility_installers:
+            if inst['name'] not in existing_names:
+                results.append(inst)
+                existing_names.add(inst['name'])
+
+    # If still not enough, use top installers statewide
+    if len(results) < 5:
+        existing_names = {r['name'] for r in results}
+        for inst in top_installers:
+            if inst['name'] not in existing_names:
+                results.append(inst)
+                existing_names.add(inst['name'])
+            if len(results) >= limit:
+                break
+
     # Sort by project count
-    installer_stats = installer_stats.sort_values('project_count', ascending=False)
-    
+    results = sorted(results, key=lambda x: x.get('project_count', 0), reverse=True)[:limit]
+
     # Format output
     installers = []
-    for _, row in installer_stats.head(limit).iterrows():
+    for inst in results:
         installers.append({
-            'name': row['name'],
-            'project_count': int(row['project_count']),
-            'avg_cost_per_watt': round(row['avg_cost_per_watt'], 2) if pd.notna(row['avg_cost_per_watt']) else None,
-            'avg_system_size_kw': round(row['avg_system_size_kw'], 2) if pd.notna(row['avg_system_size_kw']) else None,
-            'phone': row['phone'] if pd.notna(row['phone']) else None,
-            'city': row['city'] if pd.notna(row['city']) else None,
-            'state': row['state'] if pd.notna(row['state']) else None,
-            'zip': row['zip'] if pd.notna(row['zip']) else None,
-            'cslb_license': row['cslb_license'] if pd.notna(row['cslb_license']) else None,
+            'name': inst.get('name'),
+            'project_count': inst.get('project_count'),
+            'avg_cost_per_watt': round(inst.get('avg_cost_per_watt'), 2) if inst.get('avg_cost_per_watt') else None,
+            'avg_system_size_kw': round(inst.get('avg_system_size_kw'), 2) if inst.get('avg_system_size_kw') else None,
+            'phone': inst.get('phone'),
+            'city': inst.get('city'),
+            'state': inst.get('state'),
+            'zip': inst.get('installer_zip'),
+            'cslb_license': inst.get('cslb_license'),
             'rating': None,
             'review_count': None,
             'place_id': None
         })
-    
+
     # Fetch ratings from Google Places API for top installers (limit API calls)
     for installer in installers[:5]:  # Only fetch for top 5 to limit API usage
         rating, review_count, place_id = get_business_rating_from_places(
@@ -819,14 +695,12 @@ def get_installers():
         installer['rating'] = rating
         installer['review_count'] = review_count
         installer['place_id'] = place_id
-    
+
     return jsonify({
         'installers': installers,
-        'total_found': len(installer_stats),
+        'total_found': len(results),
         'search_area': {
             'zip_code': zip_code,
-            'city': city,
-            'county': county,
             'utility': utility
         }
     })
@@ -1138,10 +1012,10 @@ def get_building_imagery():
         return jsonify({'error': str(e)}), 500
 
 
-# Start data download in background thread (allows server to start immediately)
-_data_thread = threading.Thread(target=load_data_background, daemon=True)
-_data_thread.start()
-logger.info("🌐 Server starting - data loading in background...")
+# Load installer summary at startup (small file, loads instantly)
+logger.info("📊 Loading installer summary...")
+load_installer_summary()
+logger.info("✅ Server ready!")
 
 
 if __name__ == '__main__':
