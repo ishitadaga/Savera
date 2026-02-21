@@ -1,15 +1,8 @@
 [phases.setup]
-nixPkgs = ["python311", "gcc", "curl"]
+nixPkgs = ["python311", "gcc"]
 
 [phases.install]
-cmds = [
-    "pip install -r requirements.txt",
-    "mkdir -p data",
-    "curl -L -o data/PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz https://github.com/ishitadaga/Savera/releases/download/data-v1/PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz",
-    "curl -L -o data/SCE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz https://github.com/ishitadaga/Savera/releases/download/data-v1/SCE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz",
-    "curl -L -o data/SDGE_Interconnection_Applications_Dataset_Historical-Nov2025.csv.gz https://github.com/ishitadaga/Savera/releases/download/data-v1/SDGE_Interconnection_Applications_Dataset_Historical-Nov2025.csv.gz",
-    "ls -lh data/"
-]
+cmds = ["pip install -r requirements.txt"]
 
 [start]
-cmd = "gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120"
+cmd = "gunicorn app:app --bind 0.0.0.0:$PORT --timeout 600 --workers 1"

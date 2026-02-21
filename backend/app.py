@@ -47,6 +47,10 @@ _installer_data = None
 _pricing_data = None
 _battery_pricing_data = None
 _places_rating_cache = {}  # Cache for Places API ratings
+_data_downloaded = False
+
+# Use /tmp for downloaded data (won't conflict with git LFS pointers)
+DOWNLOAD_DATA_DIR = Path('/tmp/savera_data')
 
 
 def get_business_rating_from_places(business_name, city=None, state=None):
@@ -101,11 +105,15 @@ def get_business_rating_from_places(business_name, city=None, state=None):
 
 
 def download_data_files():
-    """Download data files if they're missing or are LFS pointers."""
-    data_folder = Path(__file__).parent / 'data'
-    data_folder.mkdir(exist_ok=True)
+    """Download data files to /tmp if they're missing."""
+    global _data_downloaded
 
-    # Files to download with their URLs (GitHub raw URLs)
+    if _data_downloaded:
+        return
+
+    DOWNLOAD_DATA_DIR.mkdir(exist_ok=True)
+
+    # Files to download with their URLs
     files = {
         'PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz':
             'https://github.com/ishitadaga/Savera/releases/download/data-v1/PGE_Interconnection_Applications_Dataset_Jan2020-Nov2025.csv.gz',
@@ -116,27 +124,26 @@ def download_data_files():
     }
 
     for filename, url in files.items():
-        file_path = data_folder / filename
-        needs_download = False
+        file_path = DOWNLOAD_DATA_DIR / filename
 
-        if not file_path.exists():
-            needs_download = True
-            print(f"📥 {filename} not found, downloading...")
-        elif file_path.stat().st_size < 1000:
-            # Likely an LFS pointer
-            needs_download = True
-            print(f"📥 {filename} is LFS pointer, downloading actual file...")
+        if file_path.exists() and file_path.stat().st_size > 1000000:
+            print(f"✓ {filename} already exists ({file_path.stat().st_size / 1024 / 1024:.1f} MB)")
+            continue
 
-        if needs_download:
-            try:
-                print(f"   Downloading from {url}...")
-                response = requests.get(url, timeout=300)
-                response.raise_for_status()
-                with open(file_path, 'wb') as f:
-                    f.write(response.content)
-                print(f"✓ Downloaded {filename} ({len(response.content) / 1024 / 1024:.1f} MB)")
-            except Exception as e:
-                print(f"❌ Failed to download {filename}: {e}")
+        try:
+            print(f"📥 Downloading {filename}...")
+            response = requests.get(url, timeout=600, stream=True)
+            response.raise_for_status()
+
+            with open(file_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            print(f"✓ Downloaded {filename} ({file_path.stat().st_size / 1024 / 1024:.1f} MB)")
+        except Exception as e:
+            print(f"❌ Failed to download {filename}: {e}")
+
+    _data_downloaded = True
 
 
 def load_installer_data():
@@ -150,8 +157,8 @@ def load_installer_data():
     # Download data if needed
     download_data_files()
 
-    # Data is stored in backend/data as gzipped files
-    data_folder = Path(__file__).parent / 'data'
+    # Data is stored in /tmp/savera_data as gzipped files
+    data_folder = DOWNLOAD_DATA_DIR
 
     datasets = []
 
@@ -338,7 +345,7 @@ def debug_info():
     """Debug endpoint to check data loading status (doesn't trigger download)."""
     import os as os_module
 
-    data_folder = Path(__file__).parent / 'data'
+    data_folder = DOWNLOAD_DATA_DIR
 
     # Check what files exist
     files_info = []
