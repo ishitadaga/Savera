@@ -813,46 +813,9 @@ export default function Home() {
                   </section>
 
                   {/* 5. Installers Section - Informational */}
-                  <section className="installers-info-section" ref={installerSectionRef}>
-                    <div className="installers-header">
-                      <h3>
-                        <span>🔧</span>
-                        Installers in Your Area
-                        <span className="installers-count">({installers.length})</span>
-                      </h3>
-                    </div>
-                    <p className="installers-subtitle">
-                      {installers.length} certified installers serve your ZIP code
-                    </p>
-
-                    {installers.slice(0, 3).map((installer, index) => (
-                      <div key={index} className="installer-list-item">
-                        <div className="installer-avatar">
-                          {installer.name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()}
-                        </div>
-                        <div className="installer-info-compact">
-                          <span className="installer-name-text">{installer.name}</span>
-                          <span className="installer-stats">
-                            {installer.rating && <span className="rating">★ {installer.rating.toFixed(1)}</span>}
-                            {installer.project_count && <span> • {installer.project_count.toLocaleString()} local projects</span>}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-
-                    {installers.length > 3 && (
-                      <button className="show-more-installers">
-                        Show all {installers.length} installers
-                      </button>
-                    )}
-
-                    <div className="installers-coming-soon">
-                      <span>💡</span>
-                      <span>
-                        <strong>Quote requests coming soon.</strong> For now, search these companies directly or visit EnergySage.com
-                      </span>
-                    </div>
-                  </section>
+                  <div ref={installerSectionRef}>
+                    <InstallerList installers={installers} />
+                  </div>
                 </>
               );
             })()}
